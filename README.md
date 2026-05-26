@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Quatra Journal
 
-## Getting Started
+A Next.js trading journal with **login/register**, **Firebase Firestore**, and automatic **MT5 sync** via the QuatraSync indicator.
 
-First, run the development server:
+## Architecture
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+User → /login or /register (Firebase Auth)
+     → /dashboard
+MT5 + QuatraSync indicator → POST /api/sync → Firestore → Dashboard
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Prerequisites
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. [Firebase](https://console.firebase.google.com) project
+2. **Firestore** enabled
+3. **Authentication → Email/Password** enabled
+4. **Web app** registered (for `NEXT_PUBLIC_FIREBASE_API_KEY`)
+5. **Service account** private key (Admin SDK)
+6. MetaTrader 5 running with QuatraSync indicator attached
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Setup
 
-## Learn More
+```bash
+cp .env.example .env
+```
 
-To learn more about Next.js, take a look at the following resources:
+### `.env` variables
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Server (Admin SDK)** — from service account JSON:
+- `FIREBASE_PROJECT_ID`
+- `FIREBASE_CLIENT_EMAIL`
+- `FIREBASE_PRIVATE_KEY`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**Client (login/register)** — from Firebase Console → Project settings → Your apps → Web:
+- `NEXT_PUBLIC_FIREBASE_API_KEY`
+- `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` (e.g. `your-project.firebaseapp.com`)
+- `NEXT_PUBLIC_FIREBASE_PROJECT_ID`
 
-## Deploy on Vercel
+**App:**
+- `NEXT_PUBLIC_APP_URL=http://127.0.0.1:3000` (use `127.0.0.1` for MT5 WebRequest)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm install
+npm run dev
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Deploy Firestore rules from `firestore.rules` (denies direct client access).
+
+## User flow
+
+1. **Register** at `/register` or **sign in** at `/login`
+2. Open **Dashboard** → **Generate sync key**
+3. Install **QuatraSync** indicator in MT5 (see `/dashboard/setup`)
+4. Trades sync automatically while MT5 is running
+
+## Pages
+
+| Route | Description |
+|-------|-------------|
+| `/login` | Sign in |
+| `/register` | Create account |
+| `/dashboard` | Overview — balance, equity, open positions |
+| `/dashboard/history` | Closed trades |
+| `/dashboard/setup` | MT5 indicator setup |
+
+## API routes
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /api/auth/session` | Create session from Firebase ID token |
+| `DELETE /api/auth/session` | Sign out |
+| `POST /api/setup` | Create MT5 sync key (auth required) |
+| `POST /api/sync` | Indicator sync (`X-Api-Key` header) |
+| `GET /api/metrics` | Account metrics |
+| `GET /api/trades` | Historical trades |
+| `GET /api/open-trades` | Open positions |
+
+## Firestore structure
+
+```
+users/{userId}
+  email, accountId, createdAt
+
+accounts/{accountId}
+  userId, apiKeyHash, mt5Login, balance, equity, ...
+
+accounts/{accountId}/deals/{ticket}
+accounts/{accountId}/positions/{ticket}
+```
+
+## Tech stack
+
+- Next.js 16 (App Router)
+- Firebase Auth + Firestore (Admin SDK + client SDK)
+- QuatraSync MQL5 indicator
+- Tailwind CSS 4
