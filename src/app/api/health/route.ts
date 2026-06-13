@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
 
-import { isFirebaseConfigured, getDb } from "@/lib/firebase/admin";
-import { getCurrentUser } from "@/lib/firebase/auth-server";
-import { getUserAccountId } from "@/lib/firebase/users";
-import { getAccountDoc } from "@/lib/firebase/accounts";
-import { Timestamp } from "firebase-admin/firestore";
+import { getCurrentUser } from "@/lib/supabase/auth-server";
+import {
+  countDeals,
+  countPositions,
+  getAccountDoc,
+  getAccountSummary,
+} from "@/lib/supabase/accounts";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
+import { getUserAccountId } from "@/lib/supabase/users";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const firebaseConfigured = isFirebaseConfigured();
+  const supabaseConfigured = isSupabaseConfigured();
 
-  if (!firebaseConfigured) {
+  if (!supabaseConfigured) {
     return NextResponse.json({
       ok: false,
-      firebaseConfigured: false,
-      message: "Firebase env vars missing on server. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY in Vercel.",
+      supabaseConfigured: false,
+      message:
+        "Supabase env vars missing on server. Set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, and SUPABASE_SERVICE_ROLE_KEY.",
     });
   }
 
@@ -23,17 +28,17 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({
       ok: false,
-      firebaseConfigured: true,
+      supabaseConfigured: true,
       authenticated: false,
       message: "Not logged in.",
     });
   }
 
-  const accountId = await getUserAccountId(user.uid);
+  const accountId = await getUserAccountId(user.id);
   if (!accountId) {
     return NextResponse.json({
       ok: false,
-      firebaseConfigured: true,
+      supabaseConfigured: true,
       authenticated: true,
       accountLinked: false,
       message: "No sync key generated yet. Go to Dashboard → Setup.",
@@ -44,43 +49,28 @@ export async function GET() {
   if (!account) {
     return NextResponse.json({
       ok: false,
-      firebaseConfigured: true,
+      supabaseConfigured: true,
       authenticated: true,
       accountLinked: true,
-      message: "Account doc not found in Firestore.",
+      message: "Account row not found in Postgres.",
     });
   }
 
-  const lastSyncAt =
-    account.lastSyncAt instanceof Timestamp
-      ? account.lastSyncAt.toDate().toISOString()
-      : null;
-
-  const dealsSnap = await getDb()
-    .collection("accounts")
-    .doc(accountId)
-    .collection("deals")
-    .count()
-    .get();
-
-  const positionsSnap = await getDb()
-    .collection("accounts")
-    .doc(accountId)
-    .collection("positions")
-    .count()
-    .get();
+  const lastSyncAt = account.lastSyncAt;
+  const dealsStored = await countDeals(accountId);
+  const openPositionsStored = await countPositions(accountId);
 
   return NextResponse.json({
     ok: true,
-    firebaseConfigured: true,
+    supabaseConfigured: true,
     authenticated: true,
     accountLinked: true,
     mt5Login: account.mt5Login,
     balance: account.balance,
     equity: account.equity,
     lastSyncAt,
-    dealsStored: dealsSnap.data().count,
-    openPositionsStored: positionsSnap.data().count,
+    dealsStored,
+    openPositionsStored,
     message: lastSyncAt
       ? `Last sync: ${lastSyncAt}`
       : "Account exists but MT5 has never synced yet.",

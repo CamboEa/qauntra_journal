@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { syncErrorResponse } from "@/lib/api-error";
-import { applySync } from "@/lib/firebase/accounts";
-import { isFirebaseConfigured } from "@/lib/firebase/admin";
-import type { SyncPayload } from "@/lib/firebase/types";
+import { applySync } from "@/lib/supabase/accounts";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
+import type { SyncPayload } from "@/lib/supabase/types";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
-  if (!isFirebaseConfigured()) {
+  if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "NOT_CONFIGURED", message: "Firebase is not configured on the server." },
+      { error: "NOT_CONFIGURED", message: "Supabase is not configured on the server." },
       { status: 503 },
     );
   }

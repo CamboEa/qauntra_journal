@@ -33,6 +33,8 @@ export function TradeHistoryTable({
   const [error, setError] = useState<string | null>(null);
   const [symbolFilter, setSymbolFilter] = useState("");
   const [sortKey, setSortKey] = useState<"closeTime" | "profit">("closeTime");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const loadTrades = useCallback(async () => {
     setLoading(true);
@@ -85,6 +87,13 @@ export function TradeHistoryTable({
     });
     return list;
   }, [trades, symbolFilter, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [symbolFilter, sortKey, start, end]);
 
   const totals = useMemo(() => {
     const profit = filtered.reduce((sum, t) => sum + t.profit, 0);
@@ -174,6 +183,7 @@ export function TradeHistoryTable({
       ) : null}
 
       {/* Table */}
+      <div className="space-y-3">
       <div className="overflow-hidden rounded-xl border border-q-border bg-q-surface">
         <div className="overflow-x-auto">
           <table className="w-full min-w-240 text-left text-sm">
@@ -214,7 +224,7 @@ export function TradeHistoryTable({
                   </td>
                 </tr>
               ) : (
-                filtered.map((trade, i) => {
+                paginated.map((trade, i) => {
                   const tone = profitTone(trade.profit);
                   const plClass =
                     tone === "profit"
@@ -227,7 +237,7 @@ export function TradeHistoryTable({
                     <tr
                       key={trade._id}
                       className={`border-b border-q-border/50 transition-colors hover:bg-q-hover ${
-                        i === filtered.length - 1 ? "border-0" : ""
+                        i === paginated.length - 1 ? "border-0" : ""
                       }`}
                     >
                       <td className="px-4 py-3.5 font-mono text-xs text-q-text-3">
@@ -282,6 +292,63 @@ export function TradeHistoryTable({
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Pagination */}
+      {!loading && filtered.length > 0 && (
+        <div className="flex items-center justify-between px-1">
+          <p className="text-xs text-q-text-3">
+            Showing {(page - 1) * PAGE_SIZE + 1}–
+            {Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="rounded-lg border border-q-border bg-q-surface px-3 py-1.5 text-xs text-q-text-2 transition hover:bg-q-hover disabled:pointer-events-none disabled:opacity-40"
+            >
+              Prev
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(
+                (p) =>
+                  p === 1 || p === totalPages || Math.abs(p - page) <= 1,
+              )
+              .reduce<(number | "...")[]>((acc, p, idx, arr) => {
+                if (idx > 0 && (arr[idx - 1] as number) < p - 1)
+                  acc.push("...");
+                acc.push(p);
+                return acc;
+              }, [])
+              .map((item, idx) =>
+                item === "..." ? (
+                  <span key={`ellipsis-${idx}`} className="px-1 text-xs text-q-text-3">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={item}
+                    onClick={() => setPage(item as number)}
+                    className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                      page === item
+                        ? "border-q-brand bg-q-brand text-white"
+                        : "border-q-border bg-q-surface text-q-text-2 hover:bg-q-hover"
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ),
+              )}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="rounded-lg border border-q-border bg-q-surface px-3 py-1.5 text-xs text-q-text-2 transition hover:bg-q-hover disabled:pointer-events-none disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

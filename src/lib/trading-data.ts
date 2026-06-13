@@ -5,7 +5,7 @@ import {
   fetchHistoricalTradesForAccount,
   fetchMetricsForAccount,
   fetchOpenTradesForAccount,
-} from "./firebase/accounts";
+} from "./supabase/accounts";
 import type { Metrics, OpenTrade, Trade } from "@/types/trading";
 
 export async function fetchMetrics(): Promise<Metrics> {

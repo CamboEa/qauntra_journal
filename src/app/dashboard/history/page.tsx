@@ -4,8 +4,6 @@ import { DashboardGate } from "@/components/DashboardGate";
 import { TradeHistoryTable } from "@/components/TradeHistoryTable";
 import { getHistoryDays } from "@/lib/env";
 
-export const dynamic = "force-dynamic";
-
 export default function HistoryPage() {
   const historyDays = getHistoryDays();
   const now = new Date();

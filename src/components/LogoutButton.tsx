@@ -1,10 +1,7 @@
 "use client";
 
-import { signOut } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-import { getFirebaseAuth } from "@/lib/firebase/client";
 
 type LogoutButtonProps = {
   email?: string | null;
@@ -18,11 +15,6 @@ export function LogoutButton({ email }: LogoutButtonProps) {
     setLoading(true);
     try {
       await fetch("/api/auth/session", { method: "DELETE" });
-      try {
-        await signOut(getFirebaseAuth());
-      } catch {
-        /* client auth may not be initialized */
-      }
       router.push("/login");
       router.refresh();
     } finally {

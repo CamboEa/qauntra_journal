@@ -9,7 +9,7 @@ import {
   startOfWeek,
 } from "date-fns";
 
-import type { DealDoc } from "@/lib/firebase/types";
+import type { DealDoc } from "@/lib/supabase/types";
 import type { Metrics, PeriodMetrics, Trade } from "@/types/trading";
 
 function parseDealTime(value: string): Date {

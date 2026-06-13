@@ -18,7 +18,14 @@ export function AccountBar({ mt5Login, lastSyncAt }: AccountBarProps) {
       </div>
       {lastSyncAt ? (
         <p className="mt-1.5 pl-3.5 text-xs text-q-text-3">
-          Updated {new Date(lastSyncAt).toLocaleString()}
+          Updated{" "}
+          {new Date(lastSyncAt).toLocaleString("en-GB", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
         </p>
       ) : null}
     </div>

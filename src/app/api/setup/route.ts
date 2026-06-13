@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { firebaseNotConfiguredResponse } from "@/lib/api-error";
-import { createAccount, getAccountSummary } from "@/lib/firebase/accounts";
-import { getCurrentUser } from "@/lib/firebase/auth-server";
-import { isFirebaseConfigured } from "@/lib/firebase/admin";
-import { getUserAccountId } from "@/lib/firebase/users";
+import { supabaseNotConfiguredResponse } from "@/lib/api-error";
+import { createAccount, getAccountSummary } from "@/lib/supabase/accounts";
+import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
+import { getUserAccountId } from "@/lib/supabase/users";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +17,8 @@ function appUrl(): string {
 }
 
 export async function GET() {
-  if (!isFirebaseConfigured()) {
-    return firebaseNotConfiguredResponse();
+  if (!isSupabaseConfigured()) {
+    return supabaseNotConfiguredResponse();
   }
 
   const user = await getCurrentUser();
@@ -26,7 +26,7 @@ export async function GET() {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
 
-  const accountId = await getUserAccountId(user.uid);
+  const accountId = await getUserAccountId(user.id);
   if (!accountId) {
     return NextResponse.json({ linked: false });
   }
@@ -43,8 +43,8 @@ export async function GET() {
 }
 
 export async function POST() {
-  if (!isFirebaseConfigured()) {
-    return firebaseNotConfiguredResponse();
+  if (!isSupabaseConfigured()) {
+    return supabaseNotConfiguredResponse();
   }
 
   const user = await getCurrentUser();
@@ -52,7 +52,7 @@ export async function POST() {
     return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
   }
 
-  const existingAccountId = await getUserAccountId(user.uid);
+  const existingAccountId = await getUserAccountId(user.id);
   if (existingAccountId) {
     const summary = await getAccountSummary(existingAccountId);
     return NextResponse.json({
@@ -65,7 +65,7 @@ export async function POST() {
     });
   }
 
-  const { accountId, apiKey } = await createAccount(user.uid);
+  const { accountId, apiKey } = await createAccount(user.id);
 
   return NextResponse.json({
     accountId,

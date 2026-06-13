@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import { DashboardGate } from "@/components/DashboardGate";
+import { DashboardPageSkeleton } from "@/components/DashboardPageSkeleton";
 import { MetricsCards, PeriodSummary } from "@/components/MetricsCards";
 import { OpenTradesTable } from "@/components/OpenTradesTable";
 import { fetchMetrics, fetchOpenTrades } from "@/lib/trading-data";
@@ -11,7 +14,9 @@ export default async function DashboardPage() {
       title="Overview"
       description="Attach the QuatraSync indicator in MT5 to track performance live."
     >
-      <DashboardContent />
+      <Suspense fallback={<DashboardPageSkeleton titleWidth="w-32" />}>
+        <DashboardContent />
+      </Suspense>
     </DashboardGate>
   );
 }

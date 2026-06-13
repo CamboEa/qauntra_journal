@@ -1,7 +1,6 @@
 import { IndicatorSetup } from "@/components/IndicatorSetup";
 import { SetupBanner } from "@/components/SetupBanner";
-import { isUserConnected } from "@/lib/env";
-import { isFirebaseConfigured } from "@/lib/firebase/admin";
+import { getDashboardContext } from "@/lib/dashboard-context";
 
 type DashboardGateProps = {
   title: string;
@@ -14,10 +13,9 @@ export async function DashboardGate({
   description,
   children,
 }: DashboardGateProps) {
-  const firebaseOk = isFirebaseConfigured();
-  const linked = firebaseOk && (await isUserConnected());
+  const { supabaseOk, linked } = await getDashboardContext();
 
-  if (!firebaseOk) {
+  if (!supabaseOk) {
     return (
       <div className="space-y-6">
         <header>

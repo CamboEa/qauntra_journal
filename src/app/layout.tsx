@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Quatra Journal — MT5 Trading Dashboard",
   description:
-    "Trading journal dashboard for MetaTrader 5 — synced via QuatraSync indicator and Firebase",
+    "Trading journal dashboard for MetaTrader 5 — synced via QuatraSync indicator and Supabase",
 };
 
 export default function RootLayout({

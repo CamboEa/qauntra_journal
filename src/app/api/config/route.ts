@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUser } from "@/lib/firebase/auth-server";
-import { isFirebaseClientConfigured } from "@/lib/firebase/client";
-import { isFirebaseConfigured } from "@/lib/firebase/admin";
+import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { isSupabaseClientConfigured } from "@/lib/supabase/client";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
 import { isUserConnected } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +11,11 @@ export async function GET() {
   const user = await getCurrentUser();
 
   return NextResponse.json({
-    firebaseConfigured: isFirebaseConfigured(),
-    firebaseClientConfigured: isFirebaseClientConfigured(),
+    supabaseConfigured: isSupabaseConfigured(),
+    supabaseClientConfigured: isSupabaseClientConfigured(),
     authenticated: Boolean(user),
     configured:
-      isFirebaseConfigured() &&
+      isSupabaseConfigured() &&
       Boolean(user) &&
       (await isUserConnected()),
   });

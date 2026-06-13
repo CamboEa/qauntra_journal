@@ -1,8 +1,8 @@
 import "server-only";
 
-import { getCurrentUser } from "@/lib/firebase/auth-server";
-import { assertAccountOwner } from "@/lib/firebase/accounts";
-import { getUserAccountId } from "@/lib/firebase/users";
+import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { assertAccountOwner } from "@/lib/supabase/accounts";
+import { getUserAccountId } from "@/lib/supabase/users";
 
 export type AppConfig = {
   accountId: string;
@@ -17,7 +17,7 @@ export function getHistoryDays(): number {
 export async function getAccountId(): Promise<string | null> {
   const user = await getCurrentUser();
   if (!user) return null;
-  return getUserAccountId(user.uid);
+  return getUserAccountId(user.id);
 }
 
 export async function isUserConnected(): Promise<boolean> {
@@ -30,12 +30,12 @@ export async function getAppConfig(): Promise<AppConfig> {
     throw new Error("Unauthorized");
   }
 
-  const accountId = await getUserAccountId(user.uid);
+  const accountId = await getUserAccountId(user.id);
   if (!accountId) {
     throw new Error("No MT5 sync key yet. Set up the indicator from the dashboard.");
   }
 
-  await assertAccountOwner(accountId, user.uid);
+  await assertAccountOwner(accountId, user.id);
 
   return { accountId, historyDays: getHistoryDays() };
 }

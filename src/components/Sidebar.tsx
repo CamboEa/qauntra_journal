@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useTransition } from "react";
 
 import { AccountBar } from "@/components/AccountBar";
 import { LogoutButton } from "@/components/LogoutButton";
@@ -32,6 +33,30 @@ const links = [
     ),
   },
   {
+    href: "/dashboard/performance",
+    label: "Performance",
+    exact: false,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <polyline points="1,12 5,7 9,9 15,3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points="11,3 15,3 15,7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/dashboard/bots",
+    label: "Bots",
+    exact: false,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2" y="4" width="12" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="5.5" cy="8.5" r="1" fill="currentColor" />
+        <circle cx="10.5" cy="8.5" r="1" fill="currentColor" />
+        <path d="M5 4V2.5A1.5 1.5 0 0 1 6.5 1h3A1.5 1.5 0 0 1 11 2.5V4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/setup",
     label: "MT5 setup",
     exact: false,
@@ -51,6 +76,8 @@ type SidebarProps = {
 
 export function Sidebar({ email = null, account = null }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-q-border bg-q-surface px-4 py-6">
@@ -71,15 +98,30 @@ export function Sidebar({ email = null, account = null }: SidebarProps) {
           const active = link.exact
             ? pathname === link.href
             : pathname.startsWith(link.href);
+          const navigating = isPending && !active;
 
           return (
             <Link
               key={link.href}
               href={link.href}
+              prefetch
+              aria-busy={navigating}
+              onClick={(event) => {
+                if (active || event.metaKey || event.ctrlKey || event.shiftKey) {
+                  return;
+                }
+
+                event.preventDefault();
+                startTransition(() => {
+                  router.push(link.href);
+                });
+              }}
               className={`group relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors ${
                 active
                   ? "bg-q-brand/15 font-medium text-q-text"
-                  : "text-q-text-2 hover:bg-q-hover hover:text-q-text"
+                  : navigating
+                    ? "text-q-text-2 opacity-70"
+                    : "text-q-text-2 hover:bg-q-hover hover:text-q-text"
               }`}
             >
               {active && (

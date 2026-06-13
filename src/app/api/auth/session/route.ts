@@ -1,77 +1,76 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { AUTH_COOKIE_NAME } from "@/lib/constants";
-import { isFirebaseConfigured } from "@/lib/firebase/admin";
-import {
-  authCookieOptions,
-  createAuthSessionCookie,
-  getAdminAuth,
-  getSessionMaxAgeSeconds,
-} from "@/lib/firebase/auth-server";
-import { ensureUser } from "@/lib/firebase/users";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/server";
+import { signOutUser } from "@/lib/supabase/auth-server";
+import { ensureUser } from "@/lib/supabase/users";
 
 export const dynamic = "force-dynamic";
 
 type SessionBody = {
-  idToken?: string;
+  access_token?: string;
+  refresh_token?: string;
 };
 
 export async function POST(request: NextRequest) {
-  if (!isFirebaseConfigured()) {
+  if (!isSupabaseConfigured()) {
     return NextResponse.json(
-      { error: "NOT_CONFIGURED", message: "Firebase is not configured." },
+      { error: "NOT_CONFIGURED", message: "Supabase is not configured." },
       { status: 503 },
     );
   }
 
-  let body: SessionBody;
+  let body: SessionBody = {};
   try {
     body = (await request.json()) as SessionBody;
   } catch {
-    return NextResponse.json(
-      { error: "INVALID_BODY", message: "Expected JSON body." },
-      { status: 400 },
-    );
+    /* optional body when cookies already present */
   }
 
-  const idToken = body.idToken?.trim();
-  if (!idToken) {
+  const supabase = await createClient();
+
+  if (body.access_token && body.refresh_token) {
+    const { error } = await supabase.auth.setSession({
+      access_token: body.access_token,
+      refresh_token: body.refresh_token,
+    });
+
+    if (error) {
+      return NextResponse.json(
+        { error: "AUTH_ERROR", message: error.message },
+        { status: 401 },
+      );
+    }
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError || !user) {
     return NextResponse.json(
-      { error: "VALIDATION_ERROR", message: "idToken is required." },
-      { status: 400 },
+      { error: "UNAUTHORIZED", message: "Sign in to continue." },
+      { status: 401 },
     );
   }
 
   try {
-    const decoded = await getAdminAuth().verifyIdToken(idToken);
-    const sessionCookie = await createAuthSessionCookie(idToken);
-    await ensureUser(decoded.uid, decoded.email ?? "");
-
-    const maxAge = getSessionMaxAgeSeconds();
-    const response = NextResponse.json({
+    await ensureUser(user.id, user.email ?? "");
+    return NextResponse.json({
       ok: true,
-      uid: decoded.uid,
-      email: decoded.email,
+      uid: user.id,
+      email: user.email,
     });
-
-    response.cookies.set(
-      AUTH_COOKIE_NAME,
-      sessionCookie,
-      authCookieOptions(maxAge),
-    );
-
-    return response;
   } catch (error) {
     console.error("[Auth]", error);
     return NextResponse.json(
-      { error: "AUTH_ERROR", message: "Invalid or expired token." },
-      { status: 401 },
+      { error: "AUTH_ERROR", message: "Could not initialize user profile." },
+      { status: 500 },
     );
   }
 }
 
 export async function DELETE() {
-  const response = NextResponse.json({ ok: true });
-  response.cookies.set(AUTH_COOKIE_NAME, "", authCookieOptions(0));
-  return response;
+  await signOutUser();
+  return NextResponse.json({ ok: true });
 }

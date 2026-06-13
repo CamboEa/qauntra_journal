@@ -3,32 +3,28 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-} from "firebase/auth";
 
-import { getFirebaseAuth } from "@/lib/firebase/client";
+import { createClient } from "@/lib/supabase/client";
 
 type AuthFormProps = {
   mode: "login" | "register";
 };
 
-function mapAuthError(code: string): string {
-  switch (code) {
-    case "auth/email-already-in-use":
-      return "An account with this email already exists.";
-    case "auth/invalid-email":
-      return "Please enter a valid email address.";
-    case "auth/weak-password":
-      return "Password must be at least 6 characters.";
-    case "auth/user-not-found":
-    case "auth/wrong-password":
-    case "auth/invalid-credential":
-      return "Invalid email or password.";
-    default:
-      return "Something went wrong. Please try again.";
+function mapAuthError(message: string): string {
+  const lower = message.toLowerCase();
+  if (lower.includes("already registered") || lower.includes("already exists")) {
+    return "An account with this email already exists.";
   }
+  if (lower.includes("valid email")) {
+    return "Please enter a valid email address.";
+  }
+  if (lower.includes("password") && lower.includes("6")) {
+    return "Password must be at least 6 characters.";
+  }
+  if (lower.includes("invalid login credentials")) {
+    return "Invalid email or password.";
+  }
+  return "Something went wrong. Please try again.";
 }
 
 const inputClass =
@@ -54,19 +50,34 @@ export function AuthForm({ mode }: AuthFormProps) {
     setLoading(true);
 
     try {
-      const auth = getFirebaseAuth();
-      const credential =
+      const supabase = createClient();
+      const result =
         mode === "login"
-          ? await signInWithEmailAndPassword(auth, email, password)
-          : await createUserWithEmailAndPassword(auth, email, password);
+          ? await supabase.auth.signInWithPassword({ email, password })
+          : await supabase.auth.signUp({ email, password });
 
-      const idToken = await credential.user.getIdToken();
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+
+      const session = result.data.session;
+      if (!session) {
+        throw new Error(
+          mode === "register"
+            ? "Check your email to confirm your account, then sign in."
+            : "Could not create session. Please try again.",
+        );
+      }
+
       const res = await fetch("/api/auth/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
+        credentials: "include",
+        body: JSON.stringify({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        }),
       });
-
       if (!res.ok) {
         const data = (await res.json()) as { message?: string };
         throw new Error(data.message ?? "Could not create session");
@@ -75,16 +86,8 @@ export function AuthForm({ mode }: AuthFormProps) {
       router.push("/dashboard");
       router.refresh();
     } catch (e) {
-      const code =
-        e && typeof e === "object" && "code" in e
-          ? String((e as { code: string }).code)
-          : "";
       setError(
-        code
-          ? mapAuthError(code)
-          : e instanceof Error
-            ? e.message
-            : "Authentication failed",
+        e instanceof Error ? mapAuthError(e.message) : "Authentication failed",
       );
     } finally {
       setLoading(false);

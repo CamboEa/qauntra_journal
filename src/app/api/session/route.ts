@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getCurrentUser } from "@/lib/firebase/auth-server";
-import { getAccountSummary } from "@/lib/firebase/accounts";
-import { isFirebaseConfigured } from "@/lib/firebase/admin";
-import { getUserAccountId, getUserEmail } from "@/lib/firebase/users";
+import { getCurrentUser } from "@/lib/supabase/auth-server";
+import { getAccountSummary } from "@/lib/supabase/accounts";
+import { isSupabaseConfigured } from "@/lib/supabase/server";
+import { getUserAccountId, getUserEmail } from "@/lib/supabase/users";
 
 export const dynamic = "force-dynamic";
 
@@ -13,19 +13,19 @@ export async function GET() {
   if (!user) {
     return NextResponse.json({
       authenticated: false,
-      firebaseConfigured: isFirebaseConfigured(),
+      supabaseConfigured: isSupabaseConfigured(),
       account: null,
     });
   }
 
-  const accountId = await getUserAccountId(user.uid);
+  const accountId = await getUserAccountId(user.id);
   const summary = accountId ? await getAccountSummary(accountId) : null;
-  const email = (await getUserEmail(user.uid)) ?? user.email ?? null;
+  const email = (await getUserEmail(user.id)) ?? user.email ?? null;
 
   return NextResponse.json({
     authenticated: true,
-    firebaseConfigured: isFirebaseConfigured(),
-    user: { uid: user.uid, email },
+    supabaseConfigured: isSupabaseConfigured(),
+    user: { uid: user.id, email },
     account: accountId
       ? {
           accountId,
