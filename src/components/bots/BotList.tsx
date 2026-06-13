@@ -5,8 +5,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { AddBotDialog } from "@/components/bots/AddBotDialog";
+import { PageLoader } from "@/components/Spinner";
+import { cacheGet, cacheSet } from "@/lib/client-cache";
 import type { Bot, BotStatus, BotsListResponse } from "@/types/bots";
 import type { ApiErrorBody } from "@/types/trading";
+
+const BOTS_CACHE_KEY = "bots-list";
+const BOTS_TTL = 2 * 60 * 1000;
 
 const STATUS_CONFIG: Record<BotStatus, { label: string; className: string }> = {
   testing:    { label: "Testing",    className: "bg-q-brand/10 text-q-brand" },
@@ -41,19 +46,30 @@ export function BotList() {
         body: JSON.stringify({ status }),
       });
       if (!res.ok) return;
-      setBots((prev) => prev.map((b) => (b.id === botId ? { ...b, status } : b)));
+      setBots((prev) => {
+        const next = prev.map((b) => (b.id === botId ? { ...b, status } : b));
+        cacheSet(BOTS_CACHE_KEY, next, BOTS_TTL);
+        return next;
+      });
     } finally {
       setSavingStatus(null);
     }
   }
 
   const loadBots = useCallback(async () => {
+    const cached = cacheGet<Bot[]>(BOTS_CACHE_KEY);
+    if (cached) {
+      setBots(cached);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const res = await fetch("/api/bots");
       const data = (await res.json()) as BotsListResponse & ApiErrorBody;
       if (!res.ok) throw new Error(data.message ?? "Failed to load bots");
+      cacheSet(BOTS_CACHE_KEY, data.bots, BOTS_TTL);
       setBots(data.bots);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load bots");
@@ -91,9 +107,7 @@ export function BotList() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-20 text-sm text-q-text-3">
-          Loading bots…
-        </div>
+        <PageLoader label="Loading bots…" />
       ) : error ? (
         <div className="rounded-xl border border-q-loss/30 bg-q-loss/10 px-4 py-3 text-sm text-q-loss">
           {error}

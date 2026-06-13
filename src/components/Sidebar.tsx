@@ -57,6 +57,17 @@ const links = [
     ),
   },
   {
+    href: "/dashboard/pnl",
+    label: "PNL Tracker",
+    exact: false,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M2 13V6l4-3 4 3 4-2v9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M6 13V9h4v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    ),
+  },
+  {
     href: "/dashboard/setup",
     label: "MT5 setup",
     exact: false,
@@ -80,7 +91,7 @@ export function Sidebar({ email = null, account = null }: SidebarProps) {
   const [isPending, startTransition] = useTransition();
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-q-border bg-q-surface px-4 py-6">
+    <aside className="fixed inset-y-0 left-0 z-30 flex w-60 flex-col border-r border-q-border bg-q-surface px-4 py-6">
       {/* Brand */}
       <div className="mb-8 flex items-center gap-3 px-1">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-q-border-2 bg-q-surface-2 p-1.5">

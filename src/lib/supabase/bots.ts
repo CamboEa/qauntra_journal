@@ -1,5 +1,7 @@
 import "server-only";
 
+import { revalidateTag, unstable_cache } from "next/cache";
+
 import { getErrorMessage } from "@/lib/api-error";
 import { getAdminClient } from "./admin";
 import { parseBotTradesFile, type ParsedBotTrade } from "@/lib/bot-import";
@@ -73,59 +75,75 @@ function mapBotTrade(row: BotTradeRow): BotTrade {
   };
 }
 
-async function assertBotOwner(botId: string, userId: string): Promise<BotRow> {
+// Inline ownership check — avoids the extra assertBotOwner SELECT round-trip.
+async function requireBot(botId: string, userId: string): Promise<BotRow> {
   const admin = getAdminClient();
   const { data, error } = await admin
     .from("bots")
     .select("id, user_id, name, description, color, created_at, start_balance, status")
     .eq("id", botId)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (error) throw new Error(getErrorMessage(error));
-  if (!data || data.user_id !== userId) {
-    throw new Error("Bot not found");
-  }
-
+  if (!data) throw new Error("Bot not found");
   return data as BotRow;
 }
 
-export async function getBotById(botId: string, userId: string): Promise<Bot> {
-  const row = await assertBotOwner(botId, userId);
-  const admin = getAdminClient();
-  const { count, error } = await admin
-    .from("bot_trades")
-    .select("id", { count: "exact", head: true })
-    .eq("bot_id", botId);
+const TTL_BOTS   = 300; // 5 min
+const TTL_TRADES = 300; // 5 min
 
-  if (error) throw new Error(getErrorMessage(error));
-  return mapBot(row, count ?? 0);
+export async function getBotById(botId: string, userId: string): Promise<Bot> {
+  return unstable_cache(
+    async () => {
+      const admin = getAdminClient();
+      const [botResult, countResult] = await Promise.all([
+        admin
+          .from("bots")
+          .select("id, user_id, name, description, color, created_at, start_balance, status")
+          .eq("id", botId)
+          .eq("user_id", userId)
+          .maybeSingle(),
+        admin.from("bot_trades").select("id", { count: "exact", head: true }).eq("bot_id", botId),
+      ]);
+      if (botResult.error) throw new Error(getErrorMessage(botResult.error));
+      if (!botResult.data) throw new Error("Bot not found");
+      if (countResult.error) throw new Error(getErrorMessage(countResult.error));
+      return mapBot(botResult.data as BotRow, countResult.count ?? 0);
+    },
+    [`bot-${botId}`],
+    { tags: [`bot-${botId}`], revalidate: TTL_BOTS },
+  )();
 }
 
 export async function listBots(userId: string): Promise<Bot[]> {
-  const admin = getAdminClient();
-  const { data, error } = await admin
-    .from("bots")
-    .select("id, user_id, name, description, color, created_at, start_balance, status")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true });
+  return unstable_cache(
+    async () => {
+      const admin = getAdminClient();
+      const { data, error } = await admin
+        .from("bots")
+        .select("id, user_id, name, description, color, created_at, start_balance, status")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: true });
+      if (error) throw new Error(getErrorMessage(error));
+      if (!data?.length) return [];
 
-  if (error) throw new Error(getErrorMessage(error));
-  if (!data?.length) return [];
+      const botIds = data.map((row) => row.id);
+      const { data: tradeCounts, error: countError } = await admin
+        .from("bot_trades")
+        .select("bot_id")
+        .in("bot_id", botIds);
+      if (countError) throw new Error(getErrorMessage(countError));
 
-  const botIds = data.map((row) => row.id);
-  const { data: counts, error: countError } = await admin
-    .from("bot_trades")
-    .select("bot_id")
-    .in("bot_id", botIds);
-
-  if (countError) throw new Error(getErrorMessage(countError));
-
-  const countMap = new Map<string, number>();
-  for (const row of counts ?? []) {
-    countMap.set(row.bot_id, (countMap.get(row.bot_id) ?? 0) + 1);
-  }
-
-  return data.map((row) => mapBot(row as BotRow, countMap.get(row.id) ?? 0));
+      const countMap = new Map<string, number>();
+      for (const row of tradeCounts ?? []) {
+        countMap.set(row.bot_id, (countMap.get(row.bot_id) ?? 0) + 1);
+      }
+      return data.map((row) => mapBot(row as BotRow, countMap.get(row.id) ?? 0));
+    },
+    [`bots-list-${userId}`],
+    { tags: [`bots-${userId}`], revalidate: TTL_BOTS },
+  )();
 }
 
 export async function createBot(
@@ -133,11 +151,17 @@ export async function createBot(
   input: { name: string; description?: string; color?: string },
 ): Promise<Bot> {
   const admin = getAdminClient();
-  const existing = await listBots(userId);
+
+  // Count existing bots with a lightweight head query (no need to fetch all rows).
+  const { count: existingCount } = await admin
+    .from("bots")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId);
+
   const color =
     input.color ??
-    BOT_COLORS[existing.length % BOT_COLORS.length] ??
-    BOT_COLORS[0];
+    BOT_COLORS[(existingCount ?? 0) % BOT_COLORS.length] ??
+    BOT_COLORS[0]!;
 
   const { data, error } = await admin
     .from("bots")
@@ -151,36 +175,45 @@ export async function createBot(
     .single();
 
   if (error) {
-    if (error.code === "23505") {
-      throw new Error("A bot with this name already exists.");
-    }
+    if (error.code === "23505") throw new Error("A bot with this name already exists.");
     throw new Error(getErrorMessage(error));
   }
 
+  revalidateTag(`bots-${userId}`, { expire: 0 });
   return mapBot(data as BotRow, 0);
 }
 
 export async function deleteBot(botId: string, userId: string): Promise<void> {
-  await assertBotOwner(botId, userId);
   const admin = getAdminClient();
-  const { error } = await admin.from("bots").delete().eq("id", botId);
+  const { error } = await admin.from("bots").delete().eq("id", botId).eq("user_id", userId);
   if (error) throw new Error(getErrorMessage(error));
+
+  revalidateTag(`bots-${userId}`, { expire: 0 });
+  revalidateTag(`bot-${botId}`, { expire: 0 });
 }
 
 export async function getBotTrades(botId: string, userId: string): Promise<BotTrade[]> {
-  await assertBotOwner(botId, userId);
-
-  const admin = getAdminClient();
-  const { data, error } = await admin
-    .from("bot_trades")
-    .select(
-      "id, bot_id, ticket, symbol, profit, volume, type, open_time, close_time, open_price, close_price, success",
-    )
-    .eq("bot_id", botId)
-    .order("close_time", { ascending: true });
-
-  if (error) throw new Error(getErrorMessage(error));
-  return (data ?? []).map((row) => mapBotTrade(row as BotTradeRow));
+  return unstable_cache(
+    async () => {
+      const admin = getAdminClient();
+      const [ownerResult, tradesResult] = await Promise.all([
+        admin.from("bots").select("id").eq("id", botId).eq("user_id", userId).maybeSingle(),
+        admin
+          .from("bot_trades")
+          .select(
+            "id, bot_id, ticket, symbol, profit, volume, type, open_time, close_time, open_price, close_price, success",
+          )
+          .eq("bot_id", botId)
+          .order("close_time", { ascending: true }),
+      ]);
+      if (ownerResult.error) throw new Error(getErrorMessage(ownerResult.error));
+      if (!ownerResult.data) throw new Error("Bot not found");
+      if (tradesResult.error) throw new Error(getErrorMessage(tradesResult.error));
+      return (tradesResult.data ?? []).map((row) => mapBotTrade(row as BotTradeRow));
+    },
+    [`bot-trades-${botId}`],
+    { tags: [`bot-trades-${botId}`, `bot-${botId}`], revalidate: TTL_TRADES },
+  )();
 }
 
 function tradeRows(botId: string, trades: ParsedBotTrade[]) {
@@ -207,7 +240,7 @@ export async function importBotTradesFromFile(
   replaceExisting: boolean,
   mimeType?: string,
 ): Promise<{ imported: number; skipped: number; total: number }> {
-  await assertBotOwner(botId, userId);
+  await requireBot(botId, userId);
   const { trades, errors } = parseBotTradesFile(buffer, filename, mimeType);
 
   if (trades.length === 0) {
@@ -231,13 +264,13 @@ export async function importBotTradesFromFile(
     if (error) throw new Error(getErrorMessage(error));
   }
 
-  return {
-    imported: trades.length,
-    skipped: errors.length,
-    total: trades.length,
-  };
+  revalidateTag(`bot-trades-${botId}`, { expire: 0 });
+  revalidateTag(`bot-${botId}`, { expire: 0 }); // trade count changed
+  return { imported: trades.length, skipped: errors.length, total: trades.length };
 }
 
+// Fixed N+1: was 1 + N ownership checks + N trade fetches = 2N+1 queries.
+// Now: 1 bots query + 1 trades query (batched with IN) = 2 queries total.
 export async function compareBots(
   userId: string,
   botIds: string[],
@@ -245,55 +278,75 @@ export async function compareBots(
   if (botIds.length === 0) return [];
 
   const admin = getAdminClient();
-  const { data: bots, error } = await admin
-    .from("bots")
-    .select("id, user_id, name, color, start_balance")
-    .in("id", botIds)
-    .eq("user_id", userId);
+  const [botsResult, tradesResult] = await Promise.all([
+    admin
+      .from("bots")
+      .select("id, user_id, name, color, start_balance")
+      .in("id", botIds)
+      .eq("user_id", userId),
+    admin
+      .from("bot_trades")
+      .select(
+        "id, bot_id, ticket, symbol, profit, volume, type, open_time, close_time, open_price, close_price, success",
+      )
+      .in("bot_id", botIds)
+      .order("close_time", { ascending: true }),
+  ]);
 
-  if (error) throw new Error(getErrorMessage(error));
-  if (!bots?.length) return [];
+  if (botsResult.error) throw new Error(getErrorMessage(botsResult.error));
+  if (tradesResult.error) throw new Error(getErrorMessage(tradesResult.error));
 
-  const results: BotPerformanceStats[] = [];
+  const bots = botsResult.data ?? [];
+  if (!bots.length) return [];
 
-  for (const bot of bots) {
-    const trades = await getBotTrades(bot.id, userId);
-    const stats = computeTradeStats(trades);
-
-    const startBalance = bot.start_balance != null ? Number(bot.start_balance) : null;
-    const totalProfit = stats?.totalProfit ?? 0;
-
-    results.push({
-      botId: bot.id,
-      name: bot.name,
-      color: bot.color,
-      tradeCount: stats?.tradeCount ?? 0,
-      totalProfit,
-      winRate: stats?.winRate ?? 0,
-      profitFactor: stats?.profitFactor ?? 0,
-      avgWin: stats?.avgWin ?? null,
-      avgLoss: stats?.avgLoss ?? null,
-      bestTrade: stats?.bestTrade ?? null,
-      worstTrade: stats?.worstTrade ?? null,
-      wins: stats?.wins ?? 0,
-      losses: stats?.losses ?? 0,
-      startBalance,
-      endBalance: startBalance != null ? startBalance + totalProfit : null,
-    });
+  // Group trades by bot_id in memory.
+  const tradesByBot = new Map<string, BotTrade[]>();
+  for (const row of tradesResult.data ?? []) {
+    const list = tradesByBot.get(row.bot_id) ?? [];
+    list.push(mapBotTrade(row as BotTradeRow));
+    tradesByBot.set(row.bot_id, list);
   }
 
-  return results.sort((a, b) => b.totalProfit - a.totalProfit);
+  return bots
+    .map((bot) => {
+      const trades = tradesByBot.get(bot.id) ?? [];
+      const stats = computeTradeStats(trades);
+      const startBalance = bot.start_balance != null ? Number(bot.start_balance) : null;
+      const totalProfit = stats?.totalProfit ?? 0;
+
+      return {
+        botId: bot.id,
+        name: bot.name,
+        color: bot.color,
+        tradeCount: stats?.tradeCount ?? 0,
+        totalProfit,
+        winRate: stats?.winRate ?? 0,
+        profitFactor: stats?.profitFactor ?? 0,
+        avgWin: stats?.avgWin ?? null,
+        avgLoss: stats?.avgLoss ?? null,
+        bestTrade: stats?.bestTrade ?? null,
+        worstTrade: stats?.worstTrade ?? null,
+        wins: stats?.wins ?? 0,
+        losses: stats?.losses ?? 0,
+        startBalance,
+        endBalance: startBalance != null ? startBalance + totalProfit : null,
+      } satisfies BotPerformanceStats;
+    })
+    .sort((a, b) => b.totalProfit - a.totalProfit);
 }
 
+// Inline ownership in UPDATE — no separate SELECT round-trip.
 export async function updateBotStatus(
   botId: string,
   userId: string,
   status: BotStatus | null,
 ): Promise<void> {
-  await assertBotOwner(botId, userId);
   const admin = getAdminClient();
-  const { error } = await admin.from("bots").update({ status }).eq("id", botId);
+  const { error } = await admin.from("bots").update({ status }).eq("id", botId).eq("user_id", userId);
   if (error) throw new Error(getErrorMessage(error));
+
+  revalidateTag(`bot-${botId}`, { expire: 0 });
+  revalidateTag(`bots-${userId}`, { expire: 0 });
 }
 
 export async function updateBotStartBalance(
@@ -301,11 +354,14 @@ export async function updateBotStartBalance(
   userId: string,
   startBalance: number | null,
 ): Promise<void> {
-  await assertBotOwner(botId, userId);
   const admin = getAdminClient();
   const { error } = await admin
     .from("bots")
     .update({ start_balance: startBalance })
-    .eq("id", botId);
+    .eq("id", botId)
+    .eq("user_id", userId);
   if (error) throw new Error(getErrorMessage(error));
+
+  revalidateTag(`bot-${botId}`, { expire: 0 });
+  revalidateTag(`bots-${userId}`, { expire: 0 });
 }
