@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { revalidateTag, unstable_cache } from "next/cache";
 
 import { computeMetrics, dealSuccess, dealToTrade, positionToOpenTrade } from "@/lib/metrics";
 import { generateApiKey, hashApiKey, verifyApiKey } from "@/lib/sync-auth";
@@ -17,11 +18,6 @@ import type {
   SyncPositionPayload,
 } from "./types";
 import { mapAccountRow, mapDealRow, mapPositionRow } from "./types";
-
-const ACCOUNT_TTL_MS = 30_000;
-
-type CacheEntry<T> = { value: T; expiresAt: number };
-const accountCache = new Map<string, CacheEntry<AccountDoc | null>>();
 
 function parseMT5Date(value: string): Date {
   return new Date(value.replace(/\./g, "-").replace(" ", "T"));
@@ -65,7 +61,7 @@ export async function regenerateApiKey(accountId: string): Promise<string> {
     .eq("id", accountId);
 
   if (error) throw error;
-  accountCache.delete(accountId);
+  revalidateTag(`account-${accountId}`, { expire: 0 });
 
   return apiKey;
 }
@@ -97,23 +93,23 @@ export async function assertAccountOwner(
 
 export const getAccountDoc = cache(
   async (accountId: string): Promise<AccountDoc | null> => {
-    const hit = accountCache.get(accountId);
-    if (hit && hit.expiresAt > Date.now()) return hit.value;
+    return unstable_cache(
+      async () => {
+        const admin = getAdminClient();
+        const { data, error } = await admin
+          .from("accounts")
+          .select(
+            "id, user_id, api_key_hash, mt5_login, balance, equity, margin, free_margin, last_sync_at, created_at",
+          )
+          .eq("id", accountId)
+          .maybeSingle();
 
-    const admin = getAdminClient();
-    const { data, error } = await admin
-      .from("accounts")
-      .select(
-        "id, user_id, api_key_hash, mt5_login, balance, equity, margin, free_margin, last_sync_at, created_at",
-      )
-      .eq("id", accountId)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    const value = data ? mapAccountRow(data as never) : null;
-    accountCache.set(accountId, { value, expiresAt: Date.now() + ACCOUNT_TTL_MS });
-    return value;
+        if (error) throw error;
+        return data ? mapAccountRow(data as never) : null;
+      },
+      [`account-doc-${accountId}`],
+      { tags: [`account-${accountId}`], revalidate: 60 },
+    )();
   },
 );
 
@@ -208,7 +204,7 @@ export async function applySync(apiKey: string, payload: SyncPayload): Promise<v
   });
 
   if (error) throw error;
-  accountCache.delete(accountId);
+  revalidateTag(`account-${accountId}`, { expire: 0 });
 }
 
 export async function fetchMetricsForAccount(accountId: string): Promise<Metrics> {

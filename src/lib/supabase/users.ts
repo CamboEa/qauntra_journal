@@ -1,13 +1,9 @@
 import "server-only";
 
 import { cache } from "react";
+import { revalidateTag, unstable_cache } from "next/cache";
 
 import { getAdminClient } from "./admin";
-
-const TTL_MS = 60_000;
-
-type CacheEntry<T> = { value: T; expiresAt: number };
-const profileCache = new Map<string, CacheEntry<UserProfile | null>>();
 
 export type UserProfile = {
   email: string;
@@ -49,26 +45,26 @@ export async function ensureUser(userId: string, email: string): Promise<void> {
     throw error;
   }
 
-  profileCache.delete(userId);
+  revalidateTag(`user-${userId}`, { expire: 0 });
 }
 
 export const getUserProfile = cache(
   async (userId: string): Promise<UserProfile | null> => {
-    const hit = profileCache.get(userId);
-    if (hit && hit.expiresAt > Date.now()) return hit.value;
+    return unstable_cache(
+      async () => {
+        const admin = getAdminClient();
+        const { data, error } = await admin
+          .from("profiles")
+          .select("id, email, account_id, created_at")
+          .eq("id", userId)
+          .maybeSingle();
 
-    const admin = getAdminClient();
-    const { data, error } = await admin
-      .from("profiles")
-      .select("id, email, account_id, created_at")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    const value = data ? mapProfile(data as ProfileRow) : null;
-    profileCache.set(userId, { value, expiresAt: Date.now() + TTL_MS });
-    return value;
+        if (error) throw error;
+        return data ? mapProfile(data as ProfileRow) : null;
+      },
+      [`user-profile-${userId}`],
+      { tags: [`user-${userId}`], revalidate: 300 },
+    )();
   },
 );
 
@@ -88,7 +84,7 @@ export async function linkAccountToUser(
     .eq("id", userId);
 
   if (error) throw error;
-  profileCache.delete(userId);
+  revalidateTag(`user-${userId}`, { expire: 0 });
 }
 
 export async function getUserEmail(userId: string): Promise<string | null> {
